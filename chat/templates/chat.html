@@ -1,0 +1,229 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>EmailChat – Minimal Frontend</title>
+  <style>
+    body { font-family: system-ui, Arial; max-width: 900px; margin: 24px auto; }
+    .row { margin: 8px 0; }
+    textarea, input { padding: 6px; }
+    pre { background:#111; color:#eee; padding:12px; overflow:auto; }
+    .col { display:inline-block; vertical-align:top; width:48%; }
+    button { cursor: pointer; }
+    .muted { color:#666; }
+  </style>
+</head>
+<body>
+  <h2>Minimal Frontend (inside chat app)</h2>
+
+  <!-- Login -->
+  <div class="row">
+    <strong>Login (token):</strong><br/>
+    <input id="username" placeholder="username" />
+    <input id="password" type="password" placeholder="password" />
+    <button id="btnLogin">Get Token</button>
+    <button id="btnLogout" class="muted">Logout</button>
+    <span id="loginStatus" class="muted"></span>
+  </div>
+
+  <hr/>
+
+  <!-- Chats -->
+  <div class="row">
+    <button id="btnLoadChats">Load Chats</button>
+    <div id="chats" class="muted">Chats: 0</div>
+  </div>
+
+  <hr/>
+<div class="row">
+  <h3>Invite a friend by email</h3>
+  <input id="inviteEmail" placeholder="friend@example.com" />
+  <button id="btnInvite">Send Invite</button>
+  <span id="inviteStatus" class="muted"></span>
+</div>
+
+  <!-- Create Message + WebSocket -->
+  <div class="row">
+    <div class="col">
+      <h3>Send Message (saves via REST)</h3>
+      <div>Chat ID: <input id="chatId" value="1" size="4" /></div>
+      <div>Sender (user id): <input id="senderId" value="1" size="4" /></div>
+      <div>Content:</div>
+      <textarea id="content" rows="3" cols="40"></textarea><br/>
+      <button id="btnSend">POST /api/messages/</button>
+      <div id="sendStatus" class="muted"></div>
+    </div>
+
+    <div class="col">
+      <h3>Live Chat (WebSocket)</h3>
+      <div>WS Chat ID: <input id="wsChatId" value="1" size="4" /></div>
+      <button id="btnConnectWs">Connect WS</button>
+      <button id="btnCloseWs">Close WS</button>
+      <div>Outgoing text:</div>
+      <input id="wsText" placeholder="hello via ws" />
+      <button id="btnWsSend">Send over WS</button>
+      <pre id="wsLog"></pre>
+    </div>
+  </div>
+
+  <hr/>
+  <h3>Raw Responses</h3>
+  <pre id="raw"></pre>
+
+<script>
+/* ---------- Config ---------- */
+const API = location.origin; // e.g., http://127.0.0.1:8000
+
+/* ---------- Auth state ---------- */
+let TOKEN = localStorage.getItem('token') || '';
+let sock = null;
+
+/* ---------- Helpers ---------- */
+function setToken(t) {
+  TOKEN = t || '';
+  if (t) localStorage.setItem('token', t);
+  else localStorage.removeItem('token');
+  document.getElementById('loginStatus').textContent = TOKEN ? '✓ token stored' : '';
+}
+
+function getCookie(name) {
+  // Needed only for CSRF when hitting the token endpoint
+  const parts = document.cookie.split(';').map(c => c.trim());
+  for (const c of parts) {
+    if (c.startsWith(name + '=')) return decodeURIComponent(c.slice(name.length + 1));
+  }
+  return null;
+}
+
+function showRaw(obj) {
+  document.getElementById('raw').textContent = typeof obj === 'string'
+    ? obj
+    : JSON.stringify(obj, null, 2);
+}
+
+/* ---------- Login (Token) ---------- */
+async function login() {
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+
+  // Send CSRF header in case the token endpoint is NOT csrf_exempt
+  const csrftoken = getCookie('csrftoken');
+
+  const res = await fetch(`${API}/api/auth/token/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(csrftoken ? { 'X-CSRFToken': csrftoken } : {})
+    },
+    body: JSON.stringify({ username, password })
+  });
+
+  let data = {};
+  try { data = await res.json(); } catch {}
+  showRaw(data);
+
+  if (!res.ok || !data.token) {
+    setToken('');
+    alert('Login failed');
+    return;
+  }
+  setToken(data.token);
+}
+
+function logout() {
+  setToken('');
+  showRaw('Logged out, token cleared.');
+}
+
+/* ---------- REST: list chats & send message ---------- */
+async function loadChats() {
+  const res = await fetch(`${API}/api/chats/`, {
+    headers: { 'Authorization': `Token ${TOKEN}` }
+  });
+  const data = await res.json().catch(() => ({}));
+  showRaw(data);
+  document.getElementById('chats').textContent =
+    `Chats: ${Array.isArray(data) ? data.length : 0}`;
+  if (res.status === 403) alert('Forbidden: login first or token missing');
+}
+
+async function sendMessage() {
+  const chat = parseInt(document.getElementById('chatId').value, 10);
+  const sender = parseInt(document.getElementById('senderId').value, 10);
+  const content = document.getElementById('content').value;
+
+  const res = await fetch(`${API}/api/messages/`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Token ${TOKEN}`
+    },
+    body: JSON.stringify({ chat, sender, content })
+  });
+
+  const data = await res.json().catch(() => ({}));
+  showRaw(data);
+  document.getElementById('sendStatus').textContent = res.ok ? '✓ saved' : '✗ error';
+}
+
+/* ---------- WebSocket ---------- */
+function logWs(msg) {
+  const el = document.getElementById('wsLog');
+  el.textContent += msg + '\n';
+  el.scrollTop = el.scrollHeight;
+}
+
+function connectWs() {
+  const id = document.getElementById('wsChatId').value;
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  sock = new WebSocket(`${proto}://${location.host}/ws/chat/${id}/`);
+  sock.onopen = () => logWs('WS: connected');
+  sock.onmessage = (e) => logWs('WS ← ' + e.data);
+  sock.onclose = () => logWs('WS: closed');
+}
+
+function closeWs() {
+  if (sock) { sock.close(); sock = null; }
+}
+
+function wsSend() {
+  if (!sock || sock.readyState !== 1) return alert('WS not connected');
+  const text = document.getElementById('wsText').value;
+  // your consumer expects {"message": "...", "sender": "..."}
+  sock.send(JSON.stringify({ message: text, sender: 'demo' }));
+  logWs('WS → ' + text);
+}
+
+/* ---------- Wire up buttons ---------- */
+document.getElementById('btnLogin').onclick = login;
+document.getElementById('btnLogout').onclick = logout;
+document.getElementById('btnLoadChats').onclick = loadChats;
+document.getElementById('btnSend').onclick = sendMessage;
+document.getElementById('btnConnectWs').onclick = connectWs;
+document.getElementById('btnCloseWs').onclick = closeWs;
+document.getElementById('btnWsSend').onclick = wsSend;
+
+/* ---------- Initial state ---------- */
+if (TOKEN) document.getElementById('loginStatus').textContent = '✓ token loaded';
+
+async function sendInvite() {
+  const email = document.getElementById('inviteEmail').value.trim();
+  const res = await fetch(`/api/invite/`, {
+    method: 'POST',
+    headers: { 'Content-Type':'application/json', 'Authorization': `Token ${TOKEN}` },
+    body: JSON.stringify({ email })
+  });
+  document.getElementById('inviteStatus').textContent = res.ok ? '✓ sent (check console/email)' : '✗ error';
+}
+document.getElementById('btnInvite').onclick = sendInvite;
+
+// bonus: prefill chat id from ?chat_id=...
+const params = new URLSearchParams(location.search);
+if (params.get('chat_id')) {
+  document.getElementById('wsChatId').value = params.get('chat_id');
+  document.getElementById('chatId').value = params.get('chat_id');
+}
+
+</script>
+</body>
+</html>

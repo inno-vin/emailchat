@@ -25,7 +25,8 @@ SECRET_KEY = 'django-insecure-^@+vo0b&ktx6=p%q$v3tv26lgth1!s#(p$f@yyzyh^udp!8)yc
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+
 
 
 # Application definition
@@ -42,7 +43,22 @@ INSTALLED_APPS = [
     'channels',
       # Local apps
     'chat',
+     'rest_framework.authtoken',
 ]
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.TokenAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
+}
+
+# backend/routing.py
+
+ASGI_APPLICATION = "backend.asgi.application"
 
 CORS_ALLOW_ALL_ORIGINS = True 
 
@@ -147,11 +163,13 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+from channels.layers import InMemoryChannelLayer  # (import not required but ok)
+
 CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {
-            "hosts": [("127.0.0.1", 6379)],
-        },
-    },
+    "default": { "BACKEND": "channels.layers.InMemoryChannelLayer" }
 }
+
+
+# in settings.py
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+DEFAULT_FROM_EMAIL = "no-reply@example.com"
