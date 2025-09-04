@@ -1,5 +1,5 @@
 """
-Django settings for backend project (cloud-ready).
+Django settings for backend project (cloud-ready, single instance; no Redis required).
 """
 
 from pathlib import Path
@@ -16,36 +16,46 @@ DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 # In production, set SECRET_KEY via env
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-only-please-change")
 
-# Comma-separated list in env; examples:
+# Comma-separated list in env; example:
 # ALLOWED_HOSTS="your-app.onrender.com,yourdomain.com"
-ALLOWED_HOSTS = [h.strip() for h in os.getenv("ALLOWED_HOSTS", "127.0.0.1,localhost").split(",") if h.strip()]
+ALLOWED_HOSTS = [
+    h.strip() for h in os.getenv("ALLOWED_HOSTS", "127.0.0.1,localhost").split(",") if h.strip()
+]
 
-# Needed behind reverse proxies (Render/Railway)
+# Needed behind reverse proxies (Render/Railway/etc.)
 USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # CSRF / CORS
-CSRF_TRUSTED_ORIGINS = [o.strip() for o in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()]
-CORS_ALLOWED_ORIGINS = [o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+CSRF_TRUSTED_ORIGINS = [
+    o.strip() for o in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()
+]
+CORS_ALLOWED_ORIGINS = [
+    o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()
+]
 CORS_ALLOW_ALL_ORIGINS = not CORS_ALLOWED_ORIGINS  # allow all only if none provided
 
 # ------------------------------------------------------------------------------
 # Apps
 # ------------------------------------------------------------------------------
 INSTALLED_APPS = [
-    # Whitenoise helper (no static during runserver)
+    # Whitenoise helper (avoid Django's dev static during runserver)
     "whitenoise.runserver_nostatic",
+
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+
     "rest_framework",
     "corsheaders",
     "channels",
+
     # Local apps
     "chat",
+
     "rest_framework.authtoken",
 ]
 
@@ -65,16 +75,11 @@ REST_FRAMEWORK = {
 ASGI_APPLICATION = "backend.asgi.application"
 WSGI_APPLICATION = "backend.wsgi.application"
 
-# Redis in prod; in-memory fallback for dev
-if os.getenv("REDIS_URL"):
-    CHANNEL_LAYERS = {
-        "default": {
-            "BACKEND": "channels_redis.core.RedisChannelLayer",
-            "CONFIG": {"hosts": [os.environ["REDIS_URL"]]},
-        }
-    }
-else:
-    CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
+# Single-instance websockets (no Redis). If you later need horizontal scaling,
+# switch to channels-postgres or an external Redis and update this.
+CHANNEL_LAYERS = {
+    "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}
+}
 
 # ------------------------------------------------------------------------------
 # Middleware
@@ -96,7 +101,7 @@ ROOT_URLCONF = "backend.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [BASE_DIR / "templates"],   # so TemplateView can find chat.html (optional)
+        "DIRS": [BASE_DIR / "templates"],  # so TemplateView can find chat.html (optional)
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
